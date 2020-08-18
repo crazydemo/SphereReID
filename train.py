@@ -11,16 +11,16 @@ from torch.utils.data import DataLoader
 import numpy as np
 import os.path as osp
 
-from backbone_pfe import Network_D
+from backbone import Network_D
 from sphere_loss import SphereLoss, OhemSphereLoss
-from market1501 import Market1501
+from market1501_noisy_label import Market1501
 from balanced_sampler import BalancedSampler
 
 
 ## logging
-if not os.path.exists('./res/spherereid_pfe'): os.makedirs('./res/spherereid_pfe')
+if not os.path.exists('./res/spherereid/market1501_RN_0_1'): os.makedirs('./res/spherereid/market1501_RN_0_1')
 logfile = 'sphere_reid-{}.log'.format(time.strftime('%Y-%m-%d-%H-%M-%S'))
-logfile = os.path.join('res/spherereid_pfe', logfile)
+logfile = os.path.join('res/spherereid/market1501_RN_0_1', logfile)
 FORMAT = '%(levelname)s %(filename)s(%(lineno)d): %(message)s'
 logging.basicConfig(level=logging.INFO, format=FORMAT, filename=logfile)
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def train():
     logger.info('start training')
     t_start = time.time()
     loss_it = []
-    for ep in range(50):#150
+    for ep in range(150):
         optim, lrs = lr_scheduler(ep, optim)
         for it, (imgs, lbs, ids) in enumerate(dl):
             imgs = imgs.cuda()
@@ -109,8 +109,8 @@ def train():
         t_start = t_end
 
     ## save model
-    torch.save(net.state_dict(), './res/spherereid_pfe/model_final.pkl')
-    logger.info('\nTraining done, model saved to {}\n\n'.format('./res/spherereid_pfe/model_final.pkl'))
+    torch.save(net.state_dict(), './res/spherereid/market1501_RN_0_1/model_final.pkl')
+    logger.info('\nTraining done, model saved to {}\n\n'.format('./res/spherereid/market1501_RN_0_1/model_final.pkl'))
 
 
 if __name__ == '__main__':
