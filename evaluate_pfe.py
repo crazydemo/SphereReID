@@ -10,8 +10,8 @@ import pickle
 from tqdm import tqdm
 import numpy as np
 import torch
-from backbone import Network_D
-# from backbone_pfe import Network_D
+# from backbone import Network_D
+from backbone_posterior import Network_D, Sigmanet
 from torch.utils.data import DataLoader
 from market1501 import Market1501
 
@@ -21,41 +21,65 @@ FORMAT = '%(levelname)s %(filename)s(%(lineno)d): %(message)s'
 logging.basicConfig(level=logging.INFO, format=FORMAT, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
-PATH = './res/spherereid'
+PATH = './res/spherereid_pfe_with_sigmanet'
 #'./res/spherereid/'
 
-def negative_MLS(X, Y, sigma_sq_X, sigma_sq_Y, mean=False):
+def negative_MLS(X_, Y, sigma_sq_X_, sigma_sq_Y, mean=False):
     # D = X.shape[1]
     # X = X.reshape(-1, 1, D)
     # Y = Y.reshape(1, -1, D)
+    # sigma_sq_X = sigma_sq_X.reshape(-1, 1, D)
+    # sigma_sq_Y = sigma_sq_Y.reshape(1, -1, D)
+    # sigma_sq_fuse = sigma_sq_X + sigma_sq_Y
+    # diffs = (X - Y) ** 2 / (1e-10 + sigma_sq_fuse) + np.log(sigma_sq_fuse+1e-6)
+    # return diffs.sum(-1)
+    # with open(PATH + '/embds_dist_mat.pkl', 'wb') as fw:
     diffs = []
-    for i in range(X.shape[0]):
-        diffs_sub = []
-        for j in range(Y.shape[1]):
-            # tmp_mu = (X[i, :]-Y[j, :])**2
-            # tmp_sigma = (sigma_sq_X[i, :]-sigma_sq_Y[j, :])**2
-            # tmp = tmp_mu/(1e-6+tmp_sigma)+np.log(tmp_sigma+100000)#84.71/87.18
-            # tmp = tmp_mu / (1e-6 + tmp_sigma)# + np.log(tmp_sigma + 100000)  # 84.71/87.18
-            # tmp = tmp_mu + np.log(tmp_sigma + 100000)  # 16.55/26.23
-            # tmp = tmp_mu / (1e-6 + tmp_sigma * 1e-6)# 84.71/87.18
-            # tmp = tmp_mu#87.47/89.19
-            # tmp = tmp_mu+tmp_sigma
-            tmp_mu = np.matmul(X[i, :], Y[j, :].T)
-            tmp = 1.0 / (tmp_mu + 1)
-            diffs_sub.append(tmp.sum())
+    D = X_.shape[1]
+    for i in range(0, X_.shape[0], 10):#
+        # diffs_sub = []
+        # for j in range(Y.shape[0]):
+        #     tmp_mu = (X[i, :]-Y[j, :])**2
+        #     # tmp_mu.type()
+        #     tmp_sigma = sigma_sq_X[i, :] + sigma_sq_Y[j, :]
+        #     tmp = tmp_mu/(1e-6+tmp_sigma)+np.log(tmp_sigma+1e-6)#84.71/87.18
+        #     diffs_sub.append(tmp.sum(-1))
         print(i)
-        diffs.append(diffs_sub)
+        s, e = i, i+10 if i+10<=X_.shape[0] else X_.shape[0]
+        X = X_[s:e, :]
+        sigma_sq_X = sigma_sq_X_[s:e, :]
+        print('here1')
+        X = X.reshape(-1, 1, D)
+        Y = Y.reshape(1, -1, D)
+        sigma_sq_X = sigma_sq_X.reshape(-1, 1, D)
+        sigma_sq_Y = sigma_sq_Y.reshape(1, -1, D)
+        print('here2')
+        sigma_sq_fuse = sigma_sq_X + sigma_sq_Y
+        print('here3')
+        diffs_sub = (X - Y) ** 2 / (1e-10 + sigma_sq_fuse) + np.log(sigma_sq_fuse+1e-6)
+        print('here4')
+        diffs.append(diffs_sub.sum(-1))
+        print(i)
+        # pickle.dump(embd_res, fw)
     diffs = np.vstack(diffs)
-    return diffs
 
+    return diffs
+    # with open(PATH+'/embds_dist_mat.pkl', 'rb') as fr:
+    #     embd_res = pickle.load(fr)
+    # return embd_res
 def embed():
     ## load checkpoint
     res_pth = PATH
-    mod_pth = osp.join(res_pth, 'model_final.pkl')
+    mod_pth = osp.join('./res/spherereid', 'model_final.pkl')
     net = Network_D()
     net.load_state_dict(torch.load(mod_pth))
     net.cuda()
     net.eval()
+    mod_pth = osp.join('./res/spherereid_pfe_with_sigmanet', 'model_final.pkl')
+    sigmanet = Sigmanet()
+    sigmanet.load_state_dict(torch.load(mod_pth))
+    sigmanet.cuda()
+    sigmanet.eval()
 
     ## data loader
     query_set = Market1501('/media/ivy/research/datasets/market1501/query',
@@ -80,14 +104,18 @@ def embed():
         embds = []
         for crop in im:
             crop = crop.cuda()
-            embds.append(net(crop).detach().cpu().numpy())
+            mu, x_ = net(crop)
+            sigma = sigmanet(x_)
+            embd = torch.cat([mu, sigma], -1)
+            embd = embd.detach().cpu().numpy()
+            embds.append(embd)
         embed = sum(embds) / len(embds)
         pid = ids[0].numpy()
         camid = ids[1].numpy()
         query_embds.append(embed)
         query_pids.extend(pid)
         query_camids.extend(camid)
-    query_embds = np.vstack(query_embds)
+    query_embds = np.vstack(query_embds)#.astype(np.float16)
     query_pids = np.array(query_pids)
     query_camids = np.array(query_camids)
 
@@ -102,14 +130,18 @@ def embed():
         embds = []
         for crop in im:
             crop = crop.cuda()
-            embds.append(net(crop).detach().cpu().numpy())
+            mu, x_ = net(crop)
+            sigma = sigmanet(x_)
+            embd = torch.cat([mu, sigma], -1)
+            embd = embd.detach().cpu().numpy()
+            embds.append(embd)
         embed = sum(embds) / len(embds)
         pid = ids[0].numpy()
         camid = ids[1].numpy()
         gallery_embds.append(embed)
         gallery_pids.extend(pid)
         gallery_camids.extend(camid)
-    gallery_embds = np.vstack(gallery_embds)
+    gallery_embds = np.vstack(gallery_embds)#.astype(np.float16)
     gallery_pids = np.array(gallery_pids)
     gallery_camids = np.array(gallery_camids)
 

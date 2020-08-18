@@ -5,6 +5,15 @@
 import torch
 import torch.nn as nn
 
+def negative_MLS(X, Y, sigma_sq_X, sigma_sq_Y, mean=False):
+    D = X.size()[1]
+    X = X.view(-1, 1, D)
+    Y = Y.view(1, -1, D)
+    sigma_sq_X = sigma_sq_X.view(-1, 1, D)
+    sigma_sq_Y = sigma_sq_Y.view(1, -1, D)
+    sigma_sq_fuse = sigma_sq_X + sigma_sq_Y
+    diffs = (X-Y)**2 / (1e-10 + sigma_sq_fuse) + torch.log(sigma_sq_fuse)
+    return diffs.sum(-1)
 
 class OhemSphereLoss(nn.Module):
     def __init__(self, in_feats, n_classes, thresh=0.7, scale=14, *args, **kwargs):
@@ -30,6 +39,27 @@ class OhemSphereLoss(nn.Module):
         loss, _ = torch.sort(loss, descending=True)
         loss = torch.mean(loss[:n_pick])
         return loss
+
+
+class PFELoss(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super(PFELoss, self).__init__(*args, **kwargs)
+
+    def forward(self, labels, mu, sigma, gamma):
+        batch_size = mu.size()[0]
+
+        diag_mask = torch.eye(batch_size, device='cuda')
+        non_diag_mask = 1 - diag_mask
+        # sigma = torch.exp(sigma)
+
+        loss_mat = negative_MLS(mu, mu, sigma, sigma)
+
+        label_mat = torch.eq(labels[:, None], labels[None, :])
+        label_mask_pos = non_diag_mask * label_mat.float()
+
+        loss_pos = loss_mat * label_mask_pos
+
+        return loss_pos.mean()#+gamma**2
 
 
 class SphereLoss(nn.Module):
